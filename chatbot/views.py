@@ -1,39 +1,53 @@
 from django.http import HttpResponse
 from django.views.decorators.csrf import csrf_exempt
 from twilio.twiml.messaging_response import MessagingResponse
+from .utils import get_ai_response
 from .models import UserProfile
-import requests
-import os
+
+def get_or_create_user(phone_number, name=None):
+    user, created = UserProfile.objects.get_or_create(phone_number=phone_number)
+    if name and created:
+        user.name = name
+        user.save()
+    return user
+
+def generate_personalized_response(user, text):
+    if "pain" in text.lower():
+        return f"I'm sorry to hear that, {user.name or 'friend'}. Please ensure you hydrate and rest. If pain persists, seek medical attention."
+    elif "reminder" in text.lower():
+        return f"Sure {user.name or 'there'}, I can set a reminder for you. What would you like to be reminded about?"
+    else:
+        return f"Hi {user.name or 'there'}, how can I assist you today?"
 
 # --- AI SERVICE HELPER ---
-def get_ai_response(user_input):
-    """
-    Uses DeepSeek (preferred) or OpenAI as fallback.
-    """
-    try:
-        api_key = os.getenv("DEEPSEEK_API_KEY")
-        if not api_key:
-            return "⚠️ AI service unavailable. Please try again later."
+# def get_ai_response(user_input):
+#     """
+#     Uses DeepSeek (preferred) or OpenAI as fallback.
+#     """
+#     try:
+#         api_key = os.getenv("DEEPSEEK_API_KEY")
+#         if not api_key:
+#             return "⚠️ AI service unavailable. Please try again later."
 
-        url = "https://api.deepseek.com/v1/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
-        }
-        payload = {
-            "model": "deepseek-chat",
-            "messages": [
-                {"role": "system", "content": "You are SickleCare, a friendly WhatsApp assistant for sickle cell awareness."},
-                {"role": "user", "content": user_input}
-            ]
-        }
-        response = requests.post(url, headers=headers, json=payload)
-        response.raise_for_status()
-        data = response.json()
-        return data["choices"][0]["message"]["content"].strip()
-    except Exception as e:
-        print(f"AI Error: {e}")
-        return "⚠️ AI service unavailable. Please try again later."
+#         url = "https://api.deepseek.com/v1/chat/completions"
+#         headers = {
+#             "Authorization": f"Bearer {api_key}",
+#             "Content-Type": "application/json"
+#         }
+#         payload = {
+#             "model": "deepseek-chat",
+#             "messages": [
+#                 {"role": "system", "content": "You are SickleCare, a friendly WhatsApp assistant for sickle cell awareness."},
+#                 {"role": "user", "content": user_input}
+#             ]
+#         }
+#         response = requests.post(url, headers=headers, json=payload)
+#         response.raise_for_status()
+#         data = response.json()
+#         return data["choices"][0]["message"]["content"].strip()
+#     except Exception as e:
+#         print(f"AI Error: {e}")
+#         return "⚠️ AI service unavailable. Please try again later."
 
 # --- CRISIS DETECTOR ---
 def detect_crisis(message):
@@ -45,6 +59,7 @@ def detect_crisis(message):
     return any(word in message.lower() for word in crisis_keywords)
 
 # --- MAIN WHATSAPP WEBHOOK ---
+
 @csrf_exempt
 def whatsapp_webhook(request):
     if request.method == "POST":
@@ -92,12 +107,14 @@ def whatsapp_webhook(request):
             msg.body("🏥 You can find nearby resources soon! (Feature under development)")
         elif incoming_msg == "3":
             msg.body(
-                "🚨 *Crisis Support Guide:*\n"
-                "1️⃣ Stay hydrated.\n"
-                "2️⃣ Use a warm compress.\n"
-                "3️⃣ Contact your doctor or go to the nearest hospital.\n\n"
-                "If severe, call emergency services immediately."
-            )
+                    f"✅ Registration complete, {user.name}!\n\n"
+                    "Type *menu* anytime to access:\n"
+                    "1️⃣ Sickle Cell Info\n"
+                    "2️⃣ Find Resources\n"
+                    "3️⃣ Crisis Support\n"
+                    "4️⃣ Daily Health Check\n\n"
+                    "How can I assist you today?"
+                )
         else:
             # Crisis detection
             if detect_crisis(incoming_msg):
@@ -109,10 +126,18 @@ def whatsapp_webhook(request):
                     "3️⃣ Contact your doctor or go to the nearest hospital.\n\n"
                     "If severe or life-threatening, call emergency services immediately."
                 )
+            elif incoming_msg.lower() == "reset":
+                user.chats.all().delete()
+                msg.body("🧠 Chat memory cleared! Let’s start fresh.")            
             else:
                 # AI fallback for informational questions
-                ai_reply = get_ai_response(incoming_msg)
+                ai_reply = get_ai_response(user, incoming_msg)
                 msg.body(ai_reply)
+                
+                # msg.body("⌛ Processing your request. Please wait...")                
+                # threading.Thread(target=send_to_deepseek_async, args=(sender, incoming_msg)).start()
+                
+                return HttpResponse(str(response), content_type="application/xml")
 
         return HttpResponse(str(response), content_type="application/xml")
 
