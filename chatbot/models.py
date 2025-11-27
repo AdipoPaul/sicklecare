@@ -10,10 +10,14 @@ class UserProfile(models.Model):
         ("donor", "Donor")
     ], blank=True, null=True)
     age = models.IntegerField(blank=True, null=True)
+    emergency_contacts = models.JSONField(default=list, blank=True, null=True)
+    location = models.CharField(max_length=255, blank=True, null=True)
     condition_severity = models.CharField(max_length=50, blank=True, null=True)
     preferred_language = models.CharField(max_length=20, default='English')
     registered = models.BooleanField(default=False)
     last_interaction = models.DateTimeField(auto_now=True)
+    pending_action = models.CharField(max_length=50, null=True, blank=True)
+    temp_reminder_text = models.TextField(null=True, blank=True)
 
     def __str__(self):
         return self.phone_number or self.name
@@ -27,24 +31,39 @@ class ChatHistory(models.Model):
     def __str__(self):
         return f"{self.user.phone_number} ({self.sender})"
 
+# models.py
+
 class Resource(models.Model):
-    category = models.CharField(max_length=50)
-    name = models.CharField(max_length=100)
-    location = models.CharField(max_length=100)
-    contact = models.CharField(max_length=50, blank=True)
-    description = models.TextField(blank=True)
+    CATEGORY_CHOICES = [
+        ("education", "Sickle Cell Education"),
+        ("emergency", "Emergency Guide"),
+        ("nutrition", "Nutrition & Hydration"),
+        ("pain", "Pain Management"),
+        ("mental", "Mental Health"),
+        ("caregiver", "Caregiver Guide"),
+    ]
+
+    title = models.CharField(max_length=200, default="Untitled Resource")
+    description = models.TextField(blank=True, null=True)
+    category = models.CharField(max_length=50, choices=CATEGORY_CHOICES)
+    file = models.FileField(upload_to="resources/", null=True, blank=True)
+    link = models.URLField(blank=True, null=True)
+    language = models.CharField(max_length=20, default="English")
+    created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f"{self.name} ({self.category})"
+        return self.title
+
     
 
 class Reminder(models.Model):
-    user = models.ForeignKey(UserProfile, on_delete=models.CASCADE)
-    reminder_type = models.CharField(max_length=50)  # e.g., Medication, Hydration
-    message = models.TextField()
-    reminder_time = models.DateTimeField(default=timezone.now)
-    repeat_daily = models.BooleanField(default=True)
-    is_active = models.BooleanField(default=True)
+    user = models.ForeignKey(UserProfile, on_delete=models.CASCADE, related_name="reminders")
+    message = models.CharField(max_length=500)
+    time = models.TimeField()  # HH:MM
+    date = models.DateField(null=True, blank=True)
+    recurring = models.BooleanField(default=False)  
+    created_at = models.DateTimeField(auto_now_add=True)
+    active = models.BooleanField(default=True)
 
     def __str__(self):
-        return f"{self.reminder_type} - {self.user.name}"
+        return f"{self.user.phone_number} at {self.time} - {self.message}"
